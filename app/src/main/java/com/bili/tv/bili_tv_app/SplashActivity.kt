@@ -23,6 +23,9 @@ class SplashActivity : AppCompatActivity() {
         // 初始化偏好设置
         PreferencesManager.init(this)
 
+        // 初始化 API 服务
+        com.bili.tv.bili_tv_app.data.api.BilibiliApi.init(this)
+
         // 延迟跳转到主页面
         window.decorView.postDelayed({
             startActivity(android.content.Intent(this, MainActivity::class.java))
