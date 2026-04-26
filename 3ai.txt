@@ -1,0 +1,216 @@
+## 整合方案：修复 BiliTV 空列表问题（综合 Gemini 日志增强 + Kimi/豆包 设备指纹 + 核心签名修复）
+
+### 一、核心问题确认
+
+当前代码中 `WbiSigner.signQuery` 存在**签名计算与请求参数值不一致**的致命缺陷：
+
+- 签名计算时对参数值调用了 `filterValue`（移除 `!'()*` 字符）
+- 但返回的 `out` 中却使用了原始参数值（未过滤）
+- 导致最终 URL 中的参数值与签名时的值不同，服务器校验 `w_rid` 失败，返回空列表或 `-352` 风控错误。
+
+---
+
+### 二、完整修复步骤
+
+#### 1. 修复 `WbiSigner.kt` 中的签名逻辑（核心）
+
+```kotlin
+// app/src/main/java/com/bili/tv/bili_tv_app/data/net/WbiSigner.kt
+
+object WbiSigner {
+    // ... 其他代码不变 ...
+
+    fun signQuery(params: Map<String, String>, keys: Keys, nowEpochSec: Long = System.currentTimeMillis() / 1000): Map<String, String> {
+        val mixinKey = genMixinKey(keys.imgKey + keys.subKey)
+        val withWts = params.toMutableMap()
+        withWts["wts"] = nowEpochSec.toString()
+
+        // 【修复】签名计算和返回值统一使用过滤后的参数值
+        val filtered = withWts.mapValues { filterValue(it.value) }
+        val sorted = filtered.entries.sortedBy { it.key }
+        val query = sorted.joinToString("&") { (k, v) -> "${enc(k)}=${enc(v)}" }
+        val wRid = md5Hex(query + mixinKey)
+
+        val out = filtered.toMutableMap()
+        out["w_rid"] = wRid
+        return out
+    }
+
+    // 保留 filterValue（仅在签名计算中使用）
+    private fun filterValue(v: String): String = v.filterNot { it in "!\'()*" }
+
+    // 确保 enc 可被同模块访问（已经是 internal，不需改动）
+    internal fun enc(s: String): String = percentEncodeUtf8(s)
+
+    // ... 其他代码不变 ...
+}
+```
+
+#### 2. 添加设备指纹 `buvid3`（Kimi + 豆包建议）
+
+B站 API 通常要求携带 `buvid3` Cookie，否则可能返回空数据。
+
+**修改 `CookieStore.kt`**：
+
+```kotlin
+// app/src/main/java/com/bili/tv/bili_tv_app/data/net/CookieStore.kt
+
+class CookieStore(context: Context) : CookieJar {
+    // ... 已有代码 ...
+
+    init {
+        loadFromDisk()
+        ensureBuvid3()   // 新增
+    }
+
+    private fun ensureBuvid3() {
+        val now = System.currentTimeMillis()
+        val hasBuvid3 = memoryStore.values.flatten().any { it.name == "buvid3" && it.expiresAt >= now }
+        if (!hasBuvid3) {
+            val buvid3 = generateBuvid3()
+            val cookie = Cookie.Builder()
+                .name("buvid3")
+                .value(buvid3)
+                .domain(".bilibili.com")
+                .path("/")
+                .expiresAt(now + 365L * 24 * 3600 * 1000)
+                .build()
+            val host = "api.bilibili.com"
+            val current = memoryStore[host]?.toMutableList() ?: mutableListOf()
+            current.add(cookie)
+            memoryStore[host] = current
+            saveToDisk()
+        }
+    }
+
+    private fun generateBuvid3(): String {
+        val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+        return "XY" + (1..35).map { chars.random() }.joinToString("")
+    }
+
+    fun getCookieValue(name: String): String? {
+        val now = System.currentTimeMillis()
+        return memoryStore.values.flatten().firstOrNull { it.name == name && it.expiresAt >= now }?.value
+    }
+
+    // ... 其他代码不变 ...
+}
+```
+
+#### 3. 增强日志输出（Gemini 建议）
+
+在 `BilibiliApi.kt` 的所有 API 方法中添加详细日志，便于排查。
+
+```kotlin
+// app/src/main/java/com/bili/tv/bili_tv_app/data/api/BilibiliApi.kt
+
+import android.util.Log
+
+private const val TAG = "BilibiliApi"
+
+suspend fun getRecommendVideos(freshIdx: Int = 1, ps: Int = 20): List<Video> = withContext(Dispatchers.IO) {
+    try {
+        val keys = BiliClient.ensureWbiKeys()
+        val url = BiliClient.signedWbiUrl(
+            path = "/x/web-interface/wbi/index/top/feed/rcmd",
+            params = mapOf(
+                "ps" to ps.toString(),
+                "fresh_idx" to freshIdx.toString(),
+                "fresh_idx_1h" to freshIdx.toString(),
+                "fetch_row" to "1",
+                "feed_version" to "V8"
+            ),
+            keys = keys
+        )
+        Log.d(TAG, "Recommend URL: $url")
+        val json = BiliClient.getJson(url)
+        val code = json.optInt("code", -1)
+        val message = json.optString("message", "")
+        Log.d(TAG, "Recommend response: code=$code, msg=$message, data=${json.optJSONObject("data")?.toString()?.take(200)}")
+        if (code != 0) {
+            Log.e(TAG, "Recommend API error: $code - $message")
+            return@withContext emptyList()
+        }
+        val items = json.optJSONObject("data")?.optJSONArray("item") ?: JSONArray()
+        Log.d(TAG, "Found ${items.length()} items")
+        parseVideoCards(items)
+    } catch (e: Exception) {
+        Log.e(TAG, "Recommend exception", e)
+        emptyList()
+    }
+}
+```
+
+对其他方法（`getPopularVideos`、`getRegionVideos`、`searchVideos`、`getPlayUrl` 等）同样添加日志。
+
+#### 4. 为热门和分区接口添加 WBI 签名（豆包建议）
+
+B站已逐步要求所有接口都需签名，避免未来失效。
+
+```kotlin
+suspend fun getPopularVideos(pn: Int = 1, ps: Int = 20): List<Video> = withContext(Dispatchers.IO) {
+    try {
+        val keys = BiliClient.ensureWbiKeys()
+        val url = BiliClient.signedWbiUrl(
+            path = "/x/web-interface/popular",
+            params = mapOf(
+                "pn" to pn.coerceAtLeast(1).toString(),
+                "ps" to ps.coerceIn(1, 50).toString()
+            ),
+            keys = keys
+        )
+        // ... 后续解析与原逻辑相同
+    } catch (e: Exception) { emptyList() }
+}
+```
+
+同样修改 `getRegionVideos`。
+
+#### 5. 增加用户可见的错误提示（豆包建议）
+
+在 `HomeFragment` 中，当加载失败时显示 Toast。
+
+```kotlin
+// HomeFragment.kt 中的 loadVideos 方法
+lifecycleScope.launch {
+    val videos = try {
+        when (currentCategory) {
+            0 -> BilibiliApi.getRecommendVideos()
+            1 -> BilibiliApi.getPopularVideos(currentPage)
+            else -> BilibiliApi.getRegionVideos(categoryTids[currentCategory], currentPage)
+        }
+    } catch (e: Exception) {
+        Log.e("HomeFragment", "Load error", e)
+        Toast.makeText(requireContext(), "网络错误: ${e.message}", Toast.LENGTH_SHORT).show()
+        emptyList()
+    }
+    if (videos.isEmpty()) {
+        Toast.makeText(requireContext(), "暂无视频，请检查网络或稍后重试", Toast.LENGTH_SHORT).show()
+        showEmpty(true)
+    } else {
+        showEmpty(false)
+        videoAdapter.setVideos(videos)
+    }
+}
+```
+
+---
+
+### 三、验证步骤
+
+1. 清理应用数据（设置 → 应用 → BiliTV → 清除数据）。
+2. 重新编译运行，观察 Logcat 过滤 `BilibiliApi` 标签：
+   - 确认 `code=0` 且 `items.length() > 0`。
+   - 若仍为空，检查是否有 `-352` 错误码，可能需要更换网络环境或添加更多请求头（如 `Origin`、`Referer`）。
+3. 若推荐正常，点击播放测试视频能否成功加载。
+
+---
+
+### 四、预期结果
+
+- 首页视频网格正常显示
+- 切换分类可加载对应视频
+- 搜索功能正常
+- 播放器能获取到视频流地址
+
+**注意**：若长时间未登录被风控，可能需要添加登录功能或使用有效的 `SESSDATA` Cookie。当前方案适用于未登录状态的基础功能。
