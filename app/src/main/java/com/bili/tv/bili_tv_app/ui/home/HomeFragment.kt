@@ -30,7 +30,7 @@ class HomeFragment : Fragment() {
     private lateinit var videoAdapter: VideoAdapter
 
     private var currentCategory = 0
-    private val categories = listOf("推荐", "热门", "动画", "音乐", "游戏", "科技", "知识")
+    private val categories = listOf("热门", "推荐", "动画", "音乐", "游戏", "科技", "知识")
     private val categoryTids = listOf(0, 0, 1, 3, 4, 188, 36)
 
     private var isLoading = false
@@ -130,8 +130,8 @@ class HomeFragment : Fragment() {
         lifecycleScope.launch {
             val videos = try {
                 when (currentCategory) {
-                    0 -> BilibiliApi.getRecommendVideos()
-                    1 -> BilibiliApi.getPopularVideos(currentPage)
+                    0 -> BilibiliApi.getPopularVideos(currentPage)
+                    1 -> BilibiliApi.getRecommendVideos()
                     else -> BilibiliApi.getRegionVideos(categoryTids[currentCategory], currentPage)
                 }
             } catch (e: Exception) {
@@ -161,8 +161,8 @@ class HomeFragment : Fragment() {
         lifecycleScope.launch {
             val videos = try {
                 when (currentCategory) {
-                    0 -> BilibiliApi.getRecommendVideos()
-                    1 -> BilibiliApi.getPopularVideos(currentPage)
+                    0 -> BilibiliApi.getPopularVideos(currentPage)
+                    1 -> BilibiliApi.getRecommendVideos()
                     else -> BilibiliApi.getRegionVideos(categoryTids[currentCategory], currentPage)
                 }
             } catch (e: Exception) {

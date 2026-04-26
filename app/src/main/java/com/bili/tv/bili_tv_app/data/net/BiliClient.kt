@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit
 
 object BiliClient {
     private const val BASE = "https://api.bilibili.com"
-    private const val USER_AGENT = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36"
+    const val USER_AGENT = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36"
 
     lateinit var cookies: CookieStore
         private set

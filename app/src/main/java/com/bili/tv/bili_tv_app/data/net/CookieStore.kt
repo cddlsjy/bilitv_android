@@ -104,7 +104,7 @@ class CookieStore(context: Context) : CookieJar {
             val cookie = Cookie.Builder()
                 .name("buvid3")
                 .value(buvid3)
-                .domain(".bilibili.com")
+                .domain("bilibili.com")
                 .path("/")
                 .expiresAt(now + 365L * 24 * 3600 * 1000)
                 .build()

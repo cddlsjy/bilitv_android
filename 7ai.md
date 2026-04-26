@@ -1421,4 +1421,156 @@ User-Agent 是否正确（当前使用的是 Chrome Android UA，一般没问题
 尝试使用浏览器访问生成的 API URL，看是否能正常返回数据
 检查 WBI 签名是否正确（可以使用在线工具验证）
 确认设备时间是否正确（WBI 签名依赖时间戳）
-需要我帮你生成完整的修改后文件，直接替换即可解决问题吗？
+、
+
+七、dp专家版
+根据代码分析，主界面不显示视频列表的核心原因是 **WBI 签名 URL 构建时的编码不一致**，导致 API 请求签名验证失败，服务器返回空数据或风控错误。以下是完整的问题分析与解决方案。
+
+---
+
+## 问题定位
+
+在 `BilibiliApi.kt` 中，`signedWbiUrl` 方法使用了 `URLEncoder.encode` 来拼接请求参数：
+
+```kotlin
+// 问题代码
+val query = signed.entries.joinToString("&") { (k, v) ->
+    "${URLEncoder.encode(k, "UTF-8")}=${URLEncoder.encode(v, "UTF-8")}"
+}
+```
+
+而签名计算时使用的是 `WbiSigner.enc`（自定义的 RFC 3986 百分号编码）。两种编码规则不同：
+- `URLEncoder.encode` 会将空格转成 `+`，且不编码 `*` 等字符。
+- B 站要求的 `encodeURIComponent` 风格是将空格转成 `%20`，且对更多字符编码。
+
+这导致最终请求的 URL 参数编码与签名计算时不匹配，服务器校验 `w_rid` 失败，返回 `-352` 风控错误或直接返回空列表。
+
+---
+
+## 解决方案
+
+### 1. 暴露 `WbiSigner.enc` 方法
+
+修改 `WbiSigner.kt`，将 `enc` 方法的可见性改为 `internal`（或直接 `public`，因同模块可访问）：
+
+```kotlin
+// WbiSigner.kt
+internal fun enc(s: String): String = percentEncodeUtf8(s)
+```
+
+### 2. 重写 `signedWbiUrl` 使用统一编码
+
+修改 `BilibiliApi.kt` 中的 `signedWbiUrl` 方法，使用 `WbiSigner.enc` 构建查询字符串，并移除 `URLEncoder`：
+
+```kotlin
+// BilibiliApi.kt
+private fun signedWbiUrl(path: String, params: Map<String, String>, keys: WbiSigner.Keys): String {
+    val signed = WbiSigner.signQuery(params, keys)
+    return buildString {
+        append(BASE_URL)
+        append(path)
+        append('?')
+        signed.entries.forEachIndexed { index, (k, v) ->
+            if (index > 0) append('&')
+            append(WbiSigner.enc(k))
+            append('=')
+            append(WbiSigner.enc(v))
+        }
+    }
+}
+```
+
+同时删除或注释掉原来使用 `URLEncoder` 的版本。
+
+### 3. 确认所有签名接口均使用修复后的方法
+
+检查 `getRecommendVideos`、`searchVideos`、`getPlayUrl` 等函数，确保它们调用的是修复后的 `signedWbiUrl`。
+
+### 4. 添加日志输出便于调试（可选）
+
+在 `getRecommendVideos` 中添加日志，查看服务器返回的真实 code 和 message：
+
+```kotlin
+val json = BiliClient.getJson(url)
+val code = json.optInt("code", 0)
+val message = json.optString("message")
+android.util.Log.d("BilibiliApi", "Recommend API code=$code, msg=$message")
+if (code != 0) {
+    return@withContext emptyList()
+}
+```
+
+这有助于确认问题是否解决。
+
+### 5. 完整修改示例（关键部分）
+
+**WbiSigner.kt** 修改后：
+
+```kotlin
+object WbiSigner {
+    // ... 其他代码保持不变
+
+    internal fun enc(s: String): String = percentEncodeUtf8(s)
+
+    private fun percentEncodeUtf8(s: String): String { /* 原有实现 */ }
+
+    // ... 其他代码
+}
+```
+
+**BilibiliApi.kt** 修改后（仅展示 `signedWbiUrl` 和 `getRecommendVideos` 部分）：
+
+```kotlin
+private fun signedWbiUrl(path: String, params: Map<String, String>, keys: WbiSigner.Keys): String {
+    val signed = WbiSigner.signQuery(params, keys)
+    return buildString {
+        append(BASE_URL)
+        append(path)
+        append('?')
+        signed.entries.forEachIndexed { index, (k, v) ->
+            if (index > 0) append('&')
+            append(WbiSigner.enc(k))
+            append('=')
+            append(WbiSigner.enc(v))
+        }
+    }
+}
+
+suspend fun getRecommendVideos(freshIdx: Int = 1, ps: Int = 20): List<Video> = withContext(Dispatchers.IO) {
+    try {
+        val keys = BiliClient.ensureWbiKeys()
+        val url = signedWbiUrl(
+            path = "/x/web-interface/wbi/index/top/feed/rcmd",
+            params = mapOf(
+                "ps" to ps.toString(),
+                "fresh_idx" to freshIdx.toString(),
+                "fresh_idx_1h" to freshIdx.toString(),
+                "fetch_row" to "1",
+                "feed_version" to "V8"
+            ),
+            keys = keys
+        )
+        val json = BiliClient.getJson(url)
+        val code = json.optInt("code", 0)
+        if (code != 0) {
+            Log.e("BilibiliApi", "Recommend API error: code=$code, msg=${json.optString("message")}")
+            return@withContext emptyList()
+        }
+        // ... 解析数据
+    } catch (e: Exception) { ... }
+}
+```
+
+---
+
+## 其他可能问题（次要）
+
+- **未登录影响**：部分接口（如推荐）在未登录状态下仍应返回数据，但若风控严格可能返回空。修复签名后通常可解。
+- **User-Agent 和 Referer**：代码中已正确设置，无需改动。
+- **Cookie 缺失**：`CookieStore` 会持久化服务器下发的 `buvid3` 等，首次请求时可能无 Cookie，但不会导致完全无数据。
+
+---
+
+## 预期结果
+
+完成上述修改后，重新编译运行，推荐列表、热门列表、搜索结果均应正常显示。若仍为空，请检查日志中 API 返回的 code 和 message，进一步排查网络或风控问题。
