@@ -23,19 +23,13 @@ object BilibiliApi {
 
     suspend fun getRecommendVideos(freshIdx: Int = 1, ps: Int = 20): List<Video> = withContext(Dispatchers.IO) {
         try {
-            val keys = BiliClient.ensureWbiKeys()
-            val url = BiliClient.signedWbiUrl(
-                path = "/x/web-interface/wbi/index/top/feed/rcmd",
-                params = mapOf(
-                    "ps" to ps.toString(),
-                    "fresh_idx" to freshIdx.toString(),
-                    "fresh_idx_1h" to freshIdx.toString(),
-                    "fetch_row" to "1",
-                    "feed_version" to "V8"
-                ),
-                keys = keys
-            )
+            // 尝试使用简单的推荐接口（不需要 WBI 签名）
+            val url = "${BASE_URL}/x/web-interface/index/top/feed/rcmd?ps=${ps.coerceIn(1, 50)}&fresh_idx=${freshIdx}"
+            android.util.Log.d("BilibiliApi", "Recommend URL: $url")
             val json = BiliClient.getJson(url)
+            
+            val rawJson = json.toString()
+            android.util.Log.d("BilibiliApi", "Response: ${rawJson.substring(0, minOf(500, rawJson.length))}")
 
             val code = json.optInt("code", 0)
             if (code != 0) {
@@ -43,9 +37,19 @@ object BilibiliApi {
                 return@withContext emptyList()
             }
 
-            val items = json.optJSONObject("data")?.optJSONArray("item") ?: JSONArray()
+            val data = json.optJSONObject("data") ?: JSONObject()
+            android.util.Log.d("BilibiliApi", "Data JSON keys: ${data.keys()}")
+            
+            // 尝试不同的字段名
+            val items = data.optJSONArray("item") 
+                ?: data.optJSONArray("card_list") 
+                ?: data.optJSONArray("list")
+                ?: JSONArray()
+                
+            android.util.Log.d("BilibiliApi", "Items count: ${items.length()}")
             parseVideoCards(items)
         } catch (e: Exception) {
+            android.util.Log.e("BilibiliApi", "Exception: ${e.message}", e)
             e.printStackTrace()
             emptyList()
         }
@@ -53,17 +57,23 @@ object BilibiliApi {
 
     suspend fun getPopularVideos(pn: Int = 1, ps: Int = 20): List<Video> = withContext(Dispatchers.IO) {
         try {
-            val url = "${BASE_URL}/x/web-interface/popular?pn=${pn.coerceAtLeast(1)}&ps=${ps.coerceIn(1, 50)}"
+            // 使用流行的接口，不需要登录
+            val url = "${BASE_URL}/x/popular/precision?pn=${pn.coerceAtLeast(1)}&ps=${ps.coerceIn(1, 50)}"
+            android.util.Log.d("BilibiliApi", "Popular URL: $url")
             val json = BiliClient.getJson(url)
+            android.util.Log.d("BilibiliApi", "Popular Response: ${json.toString().substring(0, minOf(300, json.toString().length))}")
+            
             val code = json.optInt("code", 0)
             if (code != 0) {
-                android.util.Log.e("BilibiliApi", "API error code=$code: ${json.optString("message")}")
+                android.util.Log.e("BilibiliApi", "Popular API error code=$code: ${json.optString("message")}")
                 return@withContext emptyList()
             }
             val data = json.optJSONObject("data") ?: JSONObject()
             val list = data.optJSONArray("list") ?: JSONArray()
+            android.util.Log.d("BilibiliApi", "Popular list count: ${list.length()}")
             parseVideoCards(list)
         } catch (e: Exception) {
+            android.util.Log.e("BilibiliApi", "Popular Exception: ${e.message}", e)
             e.printStackTrace()
             emptyList()
         }
@@ -72,16 +82,21 @@ object BilibiliApi {
     suspend fun getRegionVideos(tid: Int, pn: Int = 1, ps: Int = 20): List<Video> = withContext(Dispatchers.IO) {
         try {
             val url = "${BASE_URL}/x/web-interface/dynamic/region?rid=${tid}&pn=${pn.coerceAtLeast(1)}&ps=${ps.coerceIn(1, 50)}"
+            android.util.Log.d("BilibiliApi", "Region URL: $url (tid=$tid)")
             val json = BiliClient.getJson(url)
+            
+            android.util.Log.d("BilibiliApi", "Region Response code: ${json.optInt("code")}")
             val code = json.optInt("code", 0)
             if (code != 0) {
-                android.util.Log.e("BilibiliApi", "API error code=$code: ${json.optString("message")}")
+                android.util.Log.e("BilibiliApi", "Region API error code=$code: ${json.optString("message")}")
                 return@withContext emptyList()
             }
             val data = json.optJSONObject("data") ?: JSONObject()
             val archives = data.optJSONArray("archives") ?: JSONArray()
+            android.util.Log.d("BilibiliApi", "Region archives count: ${archives.length()}")
             parseVideoCards(archives)
         } catch (e: Exception) {
+            android.util.Log.e("BilibiliApi", "Region Exception: ${e.message}", e)
             e.printStackTrace()
             emptyList()
         }
