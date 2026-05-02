@@ -18,6 +18,8 @@ import com.bili.tv.bili_tv_app.ui.player.PlayerActivity
 import com.bili.tv.bili_tv_app.ui.search.SearchFragment
 import com.bili.tv.bili_tv_app.ui.settings.SettingsFragment
 
+import com.bili.tv.bili_tv_app.data.api.BilibiliApi
+
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
 
@@ -27,6 +29,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        BilibiliApi.init(applicationContext)
 
         // 全屏模式 - 隐藏状态栏和导航栏
         WindowCompat.setDecorFitsSystemWindows(window, false)

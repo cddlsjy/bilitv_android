@@ -30,7 +30,7 @@ data class Video(
     @SerializedName("desc")
     val desc: String? = null,
 
-    @SerializedName("aid")
+    @SerializedName("cid")
     val cid: Long = 0,
 
     @Transient

@@ -54,7 +54,16 @@ object BiliClient {
             .build()
         val response = apiOkHttp.newCall(request).execute()
         val body = response.body?.string() ?: ""
-        JSONObject(body)
+        if (body.isBlank()) {
+            android.util.Log.w("BiliClient", "Empty response for $url, code=${response.code}")
+            return@withContext JSONObject().put("code", -1).put("message", "Empty response")
+        }
+        try {
+            JSONObject(body)
+        } catch (e: Exception) {
+            android.util.Log.e("BiliClient", "Invalid JSON for $url: ${body.substring(0, minOf(200, body.length))}")
+            JSONObject().put("code", -1).put("message", "Invalid JSON response")
+        }
     }
 
     suspend fun ensureWbiKeys(): WbiSigner.Keys {

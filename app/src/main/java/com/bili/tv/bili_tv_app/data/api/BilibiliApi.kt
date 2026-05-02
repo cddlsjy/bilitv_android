@@ -57,11 +57,9 @@ object BilibiliApi {
 
     suspend fun getPopularVideos(pn: Int = 1, ps: Int = 20): List<Video> = withContext(Dispatchers.IO) {
         try {
-            // 使用流行的接口，不需要登录
-            val url = "${BASE_URL}/x/popular/precision?pn=${pn.coerceAtLeast(1)}&ps=${ps.coerceIn(1, 50)}"
+            val url = "${BASE_URL}/x/web-interface/popular?pn=${pn.coerceAtLeast(1)}&ps=${ps.coerceIn(1, 50)}"
             android.util.Log.d("BilibiliApi", "Popular URL: $url")
             val json = BiliClient.getJson(url)
-            android.util.Log.d("BilibiliApi", "Popular Response: ${json.toString().substring(0, minOf(300, json.toString().length))}")
             
             val code = json.optInt("code", 0)
             if (code != 0) {
@@ -189,43 +187,60 @@ object BilibiliApi {
     private fun parseVideoCards(arr: JSONArray): List<Video> {
         val out = ArrayList<Video>()
         for (i in 0 until arr.length()) {
-            val obj = arr.optJSONObject(i) ?: continue
-            val bvid = obj.optString("bvid", "").trim()
-            if (bvid.isBlank()) continue
+            try {
+                val obj = arr.optJSONObject(i) ?: continue
+                val bvid = obj.optString("bvid", "").trim()
+                if (bvid.isBlank()) continue
 
-            val owner = obj.optJSONObject("owner")
-            val stat = obj.optJSONObject("stat")
+                val owner = obj.optJSONObject("owner")
+                val stat = obj.optJSONObject("stat")
 
-            val durationText = obj.optString("duration_text", obj.optString("duration", "0:00"))
-            val durationSec = parseDuration(durationText)
+                val aid = obj.optLong("aid").takeIf { it > 0 }
+                    ?: obj.optLong("id").takeIf { it > 0 }
+                    ?: 0
 
-            out.add(
-                Video(
-                    bvid = bvid,
-                    aid = obj.optLong("aid").takeIf { it > 0 } ?: 0,
-                    cid = obj.optLong("cid").takeIf { it > 0 } ?: 0,
-                    title = obj.optString("title", ""),
-                    pic = obj.optString("pic", obj.optString("cover", "")),
-                    duration = durationSec,
-                    desc = obj.optString("desc", null),
-                    owner = VideoOwner(
-                        mid = owner?.optLong("mid") ?: 0,
-                        name = owner?.optString("name", "") ?: "",
-                        face = owner?.optString("face", "") ?: ""
-                    ),
-                    stat = VideoStat(
-                        view = stat?.optLong("view")?.takeIf { it > 0 } ?: stat?.optLong("play")?.takeIf { it > 0 } ?: 0,
-                        danmaku = stat?.optLong("danmaku")?.takeIf { it > 0 } ?: stat?.optLong("dm")?.takeIf { it > 0 } ?: 0,
-                        reply = stat?.optLong("reply")?.takeIf { it > 0 } ?: 0,
-                        favorite = stat?.optLong("favorite")?.takeIf { it > 0 } ?: 0,
-                        coin = stat?.optLong("coin")?.takeIf { it > 0 } ?: 0
-                    )
-                ).apply {
-                    ownerMid = owner?.optLong("mid") ?: 0
-                    ownerName = owner?.optString("name", "") ?: ""
-                    ownerFace = owner?.optString("face", "") ?: ""
-                }
-            )
+                val cid = obj.optLong("cid").takeIf { it > 0 } ?: 0
+
+                val pic = obj.optString("pic", "").ifBlank { obj.optString("cover", "") }
+
+                val durationSec = parseDurationValue(obj, "duration")
+
+                val title = obj.optString("title", "")
+
+                out.add(
+                    Video(
+                        bvid = bvid,
+                        aid = aid,
+                        cid = cid,
+                        title = title,
+                        pic = pic,
+                        duration = durationSec,
+                        desc = obj.optString("desc", null),
+                        owner = VideoOwner(
+                            mid = owner?.optLong("mid") ?: 0,
+                            name = owner?.optString("name", "") ?: "",
+                            face = owner?.optString("face", "") ?: ""
+                        ),
+                        stat = VideoStat(
+                            view = stat?.optLong("view")?.takeIf { it > 0 }
+                                ?: stat?.optLong("play")?.takeIf { it > 0 }
+                                ?: 0,
+                            danmaku = stat?.optLong("danmaku")?.takeIf { it > 0 }
+                                ?: stat?.optLong("dm")?.takeIf { it > 0 }
+                                ?: 0,
+                            reply = stat?.optLong("reply")?.takeIf { it > 0 } ?: 0,
+                            favorite = stat?.optLong("favorite")?.takeIf { it > 0 } ?: 0,
+                            coin = stat?.optLong("coin")?.takeIf { it > 0 } ?: 0
+                        )
+                    ).apply {
+                        ownerMid = owner?.optLong("mid") ?: 0
+                        ownerName = owner?.optString("name", "") ?: ""
+                        ownerFace = owner?.optString("face", "") ?: ""
+                    }
+                )
+            } catch (e: Exception) {
+                android.util.Log.w("BilibiliApi", "parseVideoCards skip item $i: ${e.message}")
+            }
         }
         return out
     }
@@ -347,6 +362,17 @@ object BilibiliApi {
             }
         } catch (_: Exception) {
             0
+        }
+    }
+
+    private fun parseDurationValue(obj: JSONObject, key: String): Int {
+        val dur = obj.opt(key) ?: return 0
+        return when (dur) {
+            is Int -> dur
+            is Long -> dur.toInt()
+            is Number -> dur.toInt()
+            is String -> parseDuration(dur)
+            else -> 0
         }
     }
 
