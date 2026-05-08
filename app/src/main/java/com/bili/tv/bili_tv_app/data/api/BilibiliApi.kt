@@ -239,7 +239,7 @@ object BilibiliApi {
                     ).apply {
                         ownerMid = owner?.optLong("mid") ?: 0
                         ownerName = owner?.optString("name", "") ?: ""
-                        ownerFace = secureOwnerFace
+                        this.ownerFace = secureOwnerFace
                     }
                 )
             } catch (e: Exception) {
