@@ -111,10 +111,12 @@ class MainActivity : AppCompatActivity() {
         fragments.values.forEach { transaction.hide(it) }
 
         val fragment = fragments.getOrPut(index) {
-            createFragment(index)
+            val f = createFragment(index)
+            transaction.add(R.id.contentContainer, f)
+            f
         }
         transaction.show(fragment)
-        transaction.commit()
+        transaction.commitAllowingStateLoss()
     }
 
     private fun createFragment(index: Int): Fragment {
