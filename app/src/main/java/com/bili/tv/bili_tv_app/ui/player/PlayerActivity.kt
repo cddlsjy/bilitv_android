@@ -15,9 +15,9 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.dash.DashMediaSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MergingMediaSource
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.ui.PlayerView
 import com.bili.tv.bili_tv_app.R
 import com.bili.tv.bili_tv_app.data.api.BilibiliApi
@@ -138,21 +138,21 @@ class PlayerActivity : AppCompatActivity() {
 
         playerView.player = player
 
-        // 构建 DASH MediaSource 并合并视频+音频
+        // 使用 ProgressiveMediaSource 加载直接的视频/音频文件，然后合并
         try {
-            val dashFactory = DashMediaSource.Factory(dataSourceFactory)
+            val progressiveFactory = ProgressiveMediaSource.Factory(dataSourceFactory)
 
             val videoItem = MediaItem.fromUri(videoUrl)
-            val videoSource = dashFactory.createMediaSource(videoItem)
+            val videoSource = progressiveFactory.createMediaSource(videoItem)
 
             if (!audioUrl.isNullOrBlank()) {
                 val audioItem = MediaItem.fromUri(audioUrl)
-                val audioSource = dashFactory.createMediaSource(audioItem)
+                val audioSource = progressiveFactory.createMediaSource(audioItem)
 
                 // 合并视频和音频流
                 val mergedSource = MergingMediaSource(videoSource, audioSource)
                 player?.setMediaSource(mergedSource)
-                android.util.Log.d("PlayerActivity", "Playing with merged video+audio")
+                android.util.Log.d("PlayerActivity", "Playing with merged video+audio (Progressive)")
             } else {
                 player?.setMediaSource(videoSource)
                 android.util.Log.d("PlayerActivity", "Playing video only (no audio)")
