@@ -202,6 +202,10 @@ object BilibiliApi {
                 val cid = obj.optLong("cid").takeIf { it > 0 } ?: 0
 
                 val pic = obj.optString("pic", "").ifBlank { obj.optString("cover", "") }
+                val securePic = if (pic.startsWith("http://")) pic.replace("http://", "https://") else pic
+
+                val ownerFace = owner?.optString("face", "") ?: ""
+                val secureOwnerFace = if (ownerFace.startsWith("http://")) ownerFace.replace("http://", "https://") else ownerFace
 
                 val durationSec = parseDurationValue(obj, "duration")
 
@@ -213,13 +217,13 @@ object BilibiliApi {
                         aid = aid,
                         cid = cid,
                         title = title,
-                        pic = pic,
+                        pic = securePic,
                         duration = durationSec,
                         desc = obj.optString("desc", null),
                         owner = VideoOwner(
                             mid = owner?.optLong("mid") ?: 0,
                             name = owner?.optString("name", "") ?: "",
-                            face = owner?.optString("face", "") ?: ""
+                            face = secureOwnerFace
                         ),
                         stat = VideoStat(
                             view = stat?.optLong("view")?.takeIf { it > 0 }
@@ -235,7 +239,7 @@ object BilibiliApi {
                     ).apply {
                         ownerMid = owner?.optLong("mid") ?: 0
                         ownerName = owner?.optString("name", "") ?: ""
-                        ownerFace = owner?.optString("face", "") ?: ""
+                        ownerFace = secureOwnerFace
                     }
                 )
             } catch (e: Exception) {
@@ -255,13 +259,16 @@ object BilibiliApi {
             val durationText = obj.optString("duration", "")
             val durationSec = parseDuration(durationText)
 
+            val pic = obj.optString("pic", "")
+            val securePic = if (pic.startsWith("http://")) pic.replace("http://", "https://") else pic
+
             out.add(
                 Video(
                     bvid = bvid,
                     aid = obj.optLong("aid").takeIf { it > 0 } ?: 0,
                     cid = obj.optLong("cid").takeIf { it > 0 } ?: 0,
                     title = obj.optString("title", ""),
-                    pic = obj.optString("pic", ""),
+                    pic = securePic,
                     duration = durationSec,
                     desc = obj.optString("description", null),
                     owner = VideoOwner(

@@ -48,21 +48,28 @@ object BiliClient {
     }
 
     suspend fun getJson(url: String): JSONObject = withContext(Dispatchers.IO) {
-        val request = Request.Builder()
-            .url(url)
-            .get()
-            .build()
-        val response = apiOkHttp.newCall(request).execute()
-        val body = response.body?.string() ?: ""
-        if (body.isBlank()) {
-            android.util.Log.w("BiliClient", "Empty response for $url, code=${response.code}")
-            return@withContext JSONObject().put("code", -1).put("message", "Empty response")
-        }
         try {
-            JSONObject(body)
+            val request = Request.Builder()
+                .url(url)
+                .get()
+                .build()
+            val response = apiOkHttp.newCall(request).execute()
+            val code = response.code
+            val body = response.body?.string() ?: ""
+            if (body.isBlank()) {
+                android.util.Log.w("BiliClient", "Empty response for $url, code=$code")
+                return@withContext JSONObject().put("code", -1).put("message", "Empty response")
+            }
+            android.util.Log.d("BiliClient", "Response code=$code for ${url.substringBefore('?')}")
+            try {
+                JSONObject(body)
+            } catch (e: Exception) {
+                android.util.Log.e("BiliClient", "Invalid JSON for $url: ${body.substring(0, minOf(200, body.length))}")
+                JSONObject().put("code", -1).put("message", "Invalid JSON response")
+            }
         } catch (e: Exception) {
-            android.util.Log.e("BiliClient", "Invalid JSON for $url: ${body.substring(0, minOf(200, body.length))}")
-            JSONObject().put("code", -1).put("message", "Invalid JSON response")
+            android.util.Log.e("BiliClient", "Network error for $url: ${e.message}", e)
+            JSONObject().put("code", -1).put("message", "Network error: ${e.message}")
         }
     }
 
