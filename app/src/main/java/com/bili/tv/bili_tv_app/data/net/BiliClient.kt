@@ -3,9 +3,9 @@ package com.bili.tv.bili_tv_app.data.net
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
@@ -39,27 +39,32 @@ object BiliClient {
                 if (original.header("Referer").isNullOrBlank()) {
                     builder.header("Referer", "https://www.bilibili.com/")
                 }
-                if (original.header("Origin").isNullOrBlank()) {
-                    builder.header("Origin", "https://www.bilibili.com")
-                }
                 chain.proceed(builder.build())
             }
             .build()
     }
 
     /**
-     * 构建带查询参数的 URL
+     * 构建带查询参数的 URL - 使用 OkHttp 的 HttpUrl.Builder
      */
     fun buildUrl(path: String, params: Map<String, String>): String {
-        val query = params.entries.joinToString("&") { (k, v) ->
-            "${WbiSigner.enc(k)}=${WbiSigner.enc(v)}"
+        val urlBuilder = "$BASE$path".toHttpUrl().newBuilder()
+        params.forEach { (key, value) ->
+            urlBuilder.addQueryParameter(key, value)
         }
-        return "$BASE$path?$query"
+        return urlBuilder.build().toString()
     }
 
     /**
-     * 发送 GET 请求并自动附带 Cookie（SESSDATA）
-     * 参考 BiliTVNative 的 BiliApiClient.getJson
+     * 构建 WBI 签名 URL
+     */
+    fun signedWbiUrl(path: String, params: Map<String, String>, keys: WbiSigner.Keys): String {
+        val signedParams = WbiSigner.signQuery(params, keys)
+        return buildUrl(path, signedParams)
+    }
+
+    /**
+     * 发送 GET 请求
      */
     suspend fun getJsonWithCookie(url: String): JSONObject = withContext(Dispatchers.IO) {
         try {
@@ -112,15 +117,7 @@ object BiliClient {
         val subKey = subUrl.substringAfterLast('/').substringBefore('.')
         val keys = WbiSigner.Keys(imgKey = imgKey, subKey = subKey, fetchedAtEpochSec = nowSec)
         wbiKeys = keys
+        android.util.Log.d("BiliClient", "WBI keys updated: imgKey=$imgKey, subKey=$subKey")
         return keys
-    }
-
-    fun signedWbiUrl(path: String, params: Map<String, String>, keys: WbiSigner.Keys, nowEpochSec: Long = System.currentTimeMillis() / 1000): String {
-        val base = "$BASE$path"
-        val signed = WbiSigner.signQuery(params, keys, nowEpochSec)
-        val query = signed.entries.joinToString("&") { (k, v) ->
-            "${WbiSigner.enc(k)}=${WbiSigner.enc(v)}"
-        }
-        return "$base?$query"
     }
 }
