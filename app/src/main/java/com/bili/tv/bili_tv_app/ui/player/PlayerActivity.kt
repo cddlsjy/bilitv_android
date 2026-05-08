@@ -8,22 +8,25 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
-import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.dash.DashMediaSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.ui.PlayerView
 import com.bili.tv.bili_tv_app.R
 import com.bili.tv.bili_tv_app.data.api.BilibiliApi
 import com.bili.tv.bili_tv_app.data.model.Video
 import kotlinx.coroutines.launch
-import okhttp3.OkHttpClient
 
 /**
  * 播放器Activity - 支持触摸和遥控器控制
+ * 使用 MergingMediaSource 合并 DASH 视频+音频流
  */
 @UnstableApi
 class PlayerActivity : AppCompatActivity() {
@@ -65,12 +68,10 @@ class PlayerActivity : AppCompatActivity() {
         playerView = findViewById(R.id.playerView)
         playerView.setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
 
-        // 设置播放器控制器
         playerView.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
             controlsVisible = visibility == View.VISIBLE
         })
 
-        // 触摸显示/隐藏控制栏
         playerView.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_UP -> {
@@ -93,20 +94,31 @@ class PlayerActivity : AppCompatActivity() {
             return
         }
 
-        // 获取视频信息
         loadVideoInfo()
     }
 
-    private fun initializePlayer(videoUrl: String, audioUrl: String?) {
-        // 配置 HTTP 数据源，添加 Referer 头
-        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+    /**
+     * 配置 HTTP 数据源工厂，添加 B站必需的 Referer 头
+     */
+    private fun createDataSourceFactory(): DefaultHttpDataSource.Factory {
+        return DefaultHttpDataSource.Factory()
             .setDefaultRequestProperties(mapOf(
                 "Referer" to "https://www.bilibili.com/",
                 "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             ))
+            .setConnectTimeoutMs(15000)
+            .setReadTimeoutMs(20000)
+    }
+
+    /**
+     * 使用 MergingMediaSource 合并视频和音频 DASH 流
+     */
+    private fun initializePlayer(videoUrl: String, audioUrl: String?) {
+        val dataSourceFactory = createDataSourceFactory()
+        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
 
         player = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(httpDataSourceFactory))
+            .setMediaSourceFactory(mediaSourceFactory)
             .build()
             .apply {
                 playWhenReady = true
@@ -114,24 +126,11 @@ class PlayerActivity : AppCompatActivity() {
 
                 addListener(object : Player.Listener {
                     override fun onPlaybackStateChanged(playbackState: Int) {
-                        when (playbackState) {
-                            Player.STATE_READY -> {
-                                // 播放就绪
-                            }
-                            Player.STATE_ENDED -> {
-                                // 播放结束
-                            }
-                            Player.STATE_BUFFERING -> {
-                                // 缓冲中
-                            }
-                            Player.STATE_IDLE -> {
-                                // 空闲
-                            }
-                        }
+                        android.util.Log.d("PlayerActivity", "Playback state: $playbackState")
                     }
 
                     override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                        android.util.Log.e("PlayerActivity", "Player error: ${error.message}", error)
+                        android.util.Log.e("PlayerActivity", "Player error: ${error.errorCodeName} - ${error.message}", error)
                         Toast.makeText(this@PlayerActivity, "播放失败: ${error.message}", Toast.LENGTH_LONG).show()
                     }
                 })
@@ -139,10 +138,31 @@ class PlayerActivity : AppCompatActivity() {
 
         playerView.player = player
 
-        // 创建 MediaItem 并设置
-        val mediaItem = MediaItem.fromUri(videoUrl)
-        player?.setMediaItem(mediaItem)
-        player?.prepare()
+        // 构建 DASH MediaSource 并合并视频+音频
+        try {
+            val dashFactory = DashMediaSource.Factory(dataSourceFactory)
+
+            val videoItem = MediaItem.fromUri(videoUrl)
+            val videoSource = dashFactory.createMediaSource(videoItem)
+
+            if (!audioUrl.isNullOrBlank()) {
+                val audioItem = MediaItem.fromUri(audioUrl)
+                val audioSource = dashFactory.createMediaSource(audioItem)
+
+                // 合并视频和音频流
+                val mergedSource = MergingMediaSource(videoSource, audioSource)
+                player?.setMediaSource(mergedSource)
+                android.util.Log.d("PlayerActivity", "Playing with merged video+audio")
+            } else {
+                player?.setMediaSource(videoSource)
+                android.util.Log.d("PlayerActivity", "Playing video only (no audio)")
+            }
+
+            player?.prepare()
+        } catch (e: Exception) {
+            android.util.Log.e("PlayerActivity", "Failed to create media source: ${e.message}", e)
+            Toast.makeText(this@PlayerActivity, "播放源创建失败: ${e.message}", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun loadVideoInfo() {
@@ -150,6 +170,7 @@ class PlayerActivity : AppCompatActivity() {
             val detail = BilibiliApi.getVideoDetail(currentBvid)
             if (detail != null) {
                 currentCid = detail.cid
+                android.util.Log.d("PlayerActivity", "Video detail: bvid=$currentBvid, cid=$currentCid, title=${detail.title}")
                 loadPlayUrl()
             } else {
                 Toast.makeText(this@PlayerActivity, "获取视频信息失败", Toast.LENGTH_SHORT).show()
@@ -164,19 +185,23 @@ class PlayerActivity : AppCompatActivity() {
             if (response?.data?.dash != null) {
                 val dashData = response.data!!.dash!!
 
-                // 优先使用 H.265 / 高画质
-                val videoUrl = dashData.video
+                // 选择最高画质的视频流
+                val videoTrack = dashData.video
                     ?.sortedByDescending { it.height }
                     ?.firstOrNull()
-                    ?.baseUrl ?: ""
 
-                val audioUrl = dashData.audio
+                // 选择最高音质的音频流
+                val audioTrack = dashData.audio
                     ?.sortedByDescending { it.id }
                     ?.firstOrNull()
-                    ?.baseUrl
 
-                android.util.Log.d("PlayerActivity", "Video URL: ${videoUrl.take(60)}...")
-                android.util.Log.d("PlayerActivity", "Audio URL: ${audioUrl?.take(60)}...")
+                val videoUrl = videoTrack?.baseUrl ?: ""
+                val audioUrl = audioTrack?.baseUrl
+
+                android.util.Log.d("PlayerActivity", "Video: ${videoTrack?.width}x${videoTrack?.height} codecs=${videoTrack?.id}")
+                android.util.Log.d("PlayerActivity", "Audio: id=${audioTrack?.id}")
+                android.util.Log.d("PlayerActivity", "Video URL: ${videoUrl.take(80)}...")
+                android.util.Log.d("PlayerActivity", "Audio URL: ${audioUrl?.take(80)}...")
 
                 if (videoUrl.isNotEmpty()) {
                     initializePlayer(videoUrl, audioUrl)
@@ -205,14 +230,12 @@ class PlayerActivity : AppCompatActivity() {
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         when (keyCode) {
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
-                // 确认键：播放/暂停
                 player?.let {
                     if (it.isPlaying) it.pause() else it.play()
                 }
                 return true
             }
             KeyEvent.KEYCODE_DPAD_LEFT -> {
-                // 左方向键：快退10秒
                 player?.let {
                     val position = it.currentPosition
                     it.seekTo(maxOf(0, position - 10000))
@@ -221,7 +244,6 @@ class PlayerActivity : AppCompatActivity() {
                 return true
             }
             KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                // 右方向键：快进10秒
                 player?.let {
                     val position = it.currentPosition
                     val duration = it.duration
@@ -231,15 +253,12 @@ class PlayerActivity : AppCompatActivity() {
                 return true
             }
             KeyEvent.KEYCODE_DPAD_UP -> {
-                // 上方向键：增加音量
                 return true
             }
             KeyEvent.KEYCODE_DPAD_DOWN -> {
-                // 下方向键：减少音量
                 return true
             }
             KeyEvent.KEYCODE_BACK -> {
-                // 返回键：退出
                 if (player?.isPlaying == true) {
                     player?.pause()
                 }
