@@ -10,16 +10,22 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import com.bili.tv.bili_tv_app.R
 import com.bili.tv.bili_tv_app.data.api.BilibiliApi
 import com.bili.tv.bili_tv_app.data.model.Video
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
 
 /**
  * 播放器Activity - 支持触摸和遥控器控制
  */
+@UnstableApi
 class PlayerActivity : AppCompatActivity() {
 
     private lateinit var playerView: PlayerView
@@ -77,12 +83,6 @@ class PlayerActivity : AppCompatActivity() {
             }
             true
         }
-
-        // 长按快进快退
-        playerView.setOnLongClickListener {
-            // 长按处理
-            true
-        }
     }
 
     private fun loadIntent() {
@@ -93,43 +93,56 @@ class PlayerActivity : AppCompatActivity() {
             return
         }
 
-        // 初始化播放器
-        initializePlayer()
-
         // 获取视频信息
         loadVideoInfo()
     }
 
-    private fun initializePlayer() {
-        player = ExoPlayer.Builder(this).build().apply {
-            playWhenReady = true
-            repeatMode = Player.REPEAT_MODE_OFF
+    private fun initializePlayer(videoUrl: String, audioUrl: String?) {
+        // 配置 HTTP 数据源，添加 Referer 头
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+            .setDefaultRequestProperties(mapOf(
+                "Referer" to "https://www.bilibili.com/",
+                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            ))
 
-            addListener(object : Player.Listener {
-                override fun onPlaybackStateChanged(playbackState: Int) {
-                    when (playbackState) {
-                        Player.STATE_READY -> {
-                            // 播放就绪
-                        }
-                        Player.STATE_ENDED -> {
-                            // 播放结束
-                        }
-                        Player.STATE_BUFFERING -> {
-                            // 缓冲中
-                        }
-                        Player.STATE_IDLE -> {
-                            // 空闲
+        player = ExoPlayer.Builder(this)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(httpDataSourceFactory))
+            .build()
+            .apply {
+                playWhenReady = true
+                repeatMode = Player.REPEAT_MODE_OFF
+
+                addListener(object : Player.Listener {
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        when (playbackState) {
+                            Player.STATE_READY -> {
+                                // 播放就绪
+                            }
+                            Player.STATE_ENDED -> {
+                                // 播放结束
+                            }
+                            Player.STATE_BUFFERING -> {
+                                // 缓冲中
+                            }
+                            Player.STATE_IDLE -> {
+                                // 空闲
+                            }
                         }
                     }
-                }
 
-                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                    Toast.makeText(this@PlayerActivity, "播放失败: ${error.message}", Toast.LENGTH_SHORT).show()
-                }
-            })
-        }
+                    override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                        android.util.Log.e("PlayerActivity", "Player error: ${error.message}", error)
+                        Toast.makeText(this@PlayerActivity, "播放失败: ${error.message}", Toast.LENGTH_LONG).show()
+                    }
+                })
+            }
 
         playerView.player = player
+
+        // 创建 MediaItem 并设置
+        val mediaItem = MediaItem.fromUri(videoUrl)
+        player?.setMediaItem(mediaItem)
+        player?.prepare()
     }
 
     private fun loadVideoInfo() {
@@ -160,12 +173,15 @@ class PlayerActivity : AppCompatActivity() {
                 val audioUrl = dashData.audio
                     ?.sortedByDescending { it.id }
                     ?.firstOrNull()
-                    ?.baseUrl ?: ""
+                    ?.baseUrl
+
+                android.util.Log.d("PlayerActivity", "Video URL: ${videoUrl.take(60)}...")
+                android.util.Log.d("PlayerActivity", "Audio URL: ${audioUrl?.take(60)}...")
 
                 if (videoUrl.isNotEmpty()) {
-                    val mediaItem = MediaItem.fromUri(videoUrl)
-                    player?.setMediaItem(mediaItem)
-                    player?.prepare()
+                    initializePlayer(videoUrl, audioUrl)
+                } else {
+                    Toast.makeText(this@PlayerActivity, "获取播放地址失败", Toast.LENGTH_SHORT).show()
                 }
             } else {
                 Toast.makeText(this@PlayerActivity, "获取播放地址失败", Toast.LENGTH_SHORT).show()
