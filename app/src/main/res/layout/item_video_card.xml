@@ -17,15 +17,15 @@
         android:layout_height="wrap_content"
         android:orientation="vertical">
 
-        <!-- 视频封面 -->
+        <!-- 视频封面 - 使用 16:9 宽高比 -->
         <FrameLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content">
+            android:layout_height="180dp">
 
             <ImageView
                 android:id="@+id/videoThumbnail"
                 android:layout_width="match_parent"
-                android:layout_height="0dp"
+                android:layout_height="match_parent"
                 android:scaleType="centerCrop"
                 tools:background="@color/surface_elevated" />
 
