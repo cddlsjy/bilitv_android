@@ -21,46 +21,51 @@ object BilibiliApi {
         BiliClient.init(context)
     }
 
+    /**
+     * 获取推荐视频 - 使用 WBI 签名接口
+     * 参考 BiliTVNative 的 VideoRepository.getRecommendVideos
+     */
     suspend fun getRecommendVideos(freshIdx: Int = 1, ps: Int = 20): List<Video> = withContext(Dispatchers.IO) {
         try {
-            // 尝试使用简单的推荐接口（不需要 WBI 签名）
-            val url = "${BASE_URL}/x/web-interface/index/top/feed/rcmd?ps=${ps.coerceIn(1, 50)}&fresh_idx=${freshIdx}"
+            val keys = BiliClient.ensureWbiKeys()
+            val params = mapOf(
+                "fresh_idx" to freshIdx.toString(),
+                "fresh_type" to "4",
+                "ps" to ps.coerceIn(1, 50).toString()
+            )
+            val url = BiliClient.signedWbiUrl("/x/web-interface/wbi/index/top/feed/rcmd", params, keys)
             android.util.Log.d("BilibiliApi", "Recommend URL: $url")
-            val json = BiliClient.getJson(url)
-            
-            val rawJson = json.toString()
-            android.util.Log.d("BilibiliApi", "Response: ${rawJson.substring(0, minOf(500, rawJson.length))}")
+            val json = BiliClient.getJsonWithCookie(url)
 
             val code = json.optInt("code", 0)
             if (code != 0) {
-                android.util.Log.e("BilibiliApi", "API error code=$code: ${json.optString("message")}")
+                android.util.Log.e("BilibiliApi", "Recommend API error code=$code: ${json.optString("message")}")
                 return@withContext emptyList()
             }
 
             val data = json.optJSONObject("data") ?: JSONObject()
-            android.util.Log.d("BilibiliApi", "Data JSON keys: ${data.keys()}")
-            
-            // 尝试不同的字段名
-            val items = data.optJSONArray("item") 
-                ?: data.optJSONArray("card_list") 
-                ?: data.optJSONArray("list")
-                ?: JSONArray()
-                
-            android.util.Log.d("BilibiliApi", "Items count: ${items.length()}")
+            val items = data.optJSONArray("item") ?: JSONArray()
+            android.util.Log.d("BilibiliApi", "Recommend items count: ${items.length()}")
             parseVideoCards(items)
         } catch (e: Exception) {
-            android.util.Log.e("BilibiliApi", "Exception: ${e.message}", e)
-            e.printStackTrace()
+            android.util.Log.e("BilibiliApi", "Recommend Exception: ${e.message}", e)
             emptyList()
         }
     }
 
+    /**
+     * 获取热门视频 - 不需要 WBI 签名
+     */
     suspend fun getPopularVideos(pn: Int = 1, ps: Int = 20): List<Video> = withContext(Dispatchers.IO) {
         try {
-            val url = "${BASE_URL}/x/web-interface/popular?pn=${pn.coerceAtLeast(1)}&ps=${ps.coerceIn(1, 50)}"
+            val params = mapOf(
+                "pn" to pn.coerceAtLeast(1).toString(),
+                "ps" to ps.coerceIn(1, 50).toString()
+            )
+            val url = BiliClient.buildUrl("/x/web-interface/popular", params)
             android.util.Log.d("BilibiliApi", "Popular URL: $url")
-            val json = BiliClient.getJson(url)
-            
+            val json = BiliClient.getJsonWithCookie(url)
+
             val code = json.optInt("code", 0)
             if (code != 0) {
                 android.util.Log.e("BilibiliApi", "Popular API error code=$code: ${json.optString("message")}")
@@ -72,18 +77,24 @@ object BilibiliApi {
             parseVideoCards(list)
         } catch (e: Exception) {
             android.util.Log.e("BilibiliApi", "Popular Exception: ${e.message}", e)
-            e.printStackTrace()
             emptyList()
         }
     }
 
+    /**
+     * 获取分区视频 - 不需要 WBI 签名
+     */
     suspend fun getRegionVideos(tid: Int, pn: Int = 1, ps: Int = 20): List<Video> = withContext(Dispatchers.IO) {
         try {
-            val url = "${BASE_URL}/x/web-interface/dynamic/region?rid=${tid}&pn=${pn.coerceAtLeast(1)}&ps=${ps.coerceIn(1, 50)}"
+            val params = mapOf(
+                "rid" to tid.toString(),
+                "pn" to pn.coerceAtLeast(1).toString(),
+                "ps" to ps.coerceIn(1, 50).toString()
+            )
+            val url = BiliClient.buildUrl("/x/web-interface/dynamic/region", params)
             android.util.Log.d("BilibiliApi", "Region URL: $url (tid=$tid)")
-            val json = BiliClient.getJson(url)
-            
-            android.util.Log.d("BilibiliApi", "Region Response code: ${json.optInt("code")}")
+            val json = BiliClient.getJsonWithCookie(url)
+
             val code = json.optInt("code", 0)
             if (code != 0) {
                 android.util.Log.e("BilibiliApi", "Region API error code=$code: ${json.optString("message")}")
@@ -95,11 +106,13 @@ object BilibiliApi {
             parseVideoCards(archives)
         } catch (e: Exception) {
             android.util.Log.e("BilibiliApi", "Region Exception: ${e.message}", e)
-            e.printStackTrace()
             emptyList()
         }
     }
 
+    /**
+     * 搜索视频 - 需要 WBI 签名
+     */
     suspend fun searchVideos(keyword: String, page: Int = 1): List<Video> = withContext(Dispatchers.IO) {
         try {
             val keys = BiliClient.ensureWbiKeys()
@@ -108,8 +121,8 @@ object BilibiliApi {
                 "keyword" to keyword,
                 "page" to page.toString()
             )
-            val url = BiliClient.signedWbiUrl("/x/search/type", params, keys)
-            val json = BiliClient.getJson(url)
+            val url = BiliClient.signedWbiUrl("/x/web-interface/wbi/search/type", params, keys)
+            val json = BiliClient.getJsonWithCookie(url)
 
             val code = json.optInt("code", 0)
             if (code != 0) {
@@ -138,7 +151,7 @@ object BilibiliApi {
                 "fourk" to "1"
             )
             val url = BiliClient.signedWbiUrl("/x/player/wbi/playurl", params, keys)
-            val json = BiliClient.getJson(url)
+            val json = BiliClient.getJsonWithCookie(url)
 
             val code = json.optInt("code", 0)
             if (code != 0) {
@@ -155,7 +168,7 @@ object BilibiliApi {
     suspend fun getVideoDetail(bvid: String): VideoDetailData? = withContext(Dispatchers.IO) {
         try {
             val url = "${BASE_URL}/x/web-interface/view?bvid=$bvid"
-            val json = BiliClient.getJson(url)
+            val json = BiliClient.getJsonWithCookie(url)
             val code = json.optInt("code", 0)
             if (code != 0) {
                 return@withContext null
@@ -184,6 +197,18 @@ object BilibiliApi {
         }
     }
 
+    /**
+     * 修复图片 URL：处理 http:// 和 // 开头的情况
+     * 参考 BiliTVNative 的 fixPicUrl
+     */
+    private fun fixPicUrl(url: String): String {
+        return when {
+            url.startsWith("//") -> "https:$url"
+            url.startsWith("http://") -> "https://${url.removePrefix("http://")}"
+            else -> url
+        }
+    }
+
     private fun parseVideoCards(arr: JSONArray): List<Video> {
         val out = ArrayList<Video>()
         for (i in 0 until arr.length()) {
@@ -201,14 +226,10 @@ object BilibiliApi {
 
                 val cid = obj.optLong("cid").takeIf { it > 0 } ?: 0
 
-                val pic = obj.optString("pic", "").ifBlank { obj.optString("cover", "") }
-                val securePic = if (pic.startsWith("http://")) pic.replace("http://", "https://") else pic
-
-                val ownerFace = owner?.optString("face", "") ?: ""
-                val secureOwnerFace = if (ownerFace.startsWith("http://")) ownerFace.replace("http://", "https://") else ownerFace
+                val pic = fixPicUrl(obj.optString("pic", "").ifBlank { obj.optString("cover", "") })
+                val ownerFace = fixPicUrl(owner?.optString("face", "") ?: "")
 
                 val durationSec = parseDurationValue(obj, "duration")
-
                 val title = obj.optString("title", "")
 
                 out.add(
@@ -217,13 +238,13 @@ object BilibiliApi {
                         aid = aid,
                         cid = cid,
                         title = title,
-                        pic = securePic,
+                        pic = pic,
                         duration = durationSec,
                         desc = obj.optString("desc", null),
                         owner = VideoOwner(
                             mid = owner?.optLong("mid") ?: 0,
                             name = owner?.optString("name", "") ?: "",
-                            face = secureOwnerFace
+                            face = ownerFace
                         ),
                         stat = VideoStat(
                             view = stat?.optLong("view")?.takeIf { it > 0 }
@@ -239,7 +260,7 @@ object BilibiliApi {
                     ).apply {
                         ownerMid = owner?.optLong("mid") ?: 0
                         ownerName = owner?.optString("name", "") ?: ""
-                        this.ownerFace = secureOwnerFace
+                        this.ownerFace = ownerFace
                     }
                 )
             } catch (e: Exception) {
@@ -258,9 +279,7 @@ object BilibiliApi {
 
             val durationText = obj.optString("duration", "")
             val durationSec = parseDuration(durationText)
-
-            val pic = obj.optString("pic", "")
-            val securePic = if (pic.startsWith("http://")) pic.replace("http://", "https://") else pic
+            val pic = fixPicUrl(obj.optString("pic", ""))
 
             out.add(
                 Video(
@@ -268,7 +287,7 @@ object BilibiliApi {
                     aid = obj.optLong("aid").takeIf { it > 0 } ?: 0,
                     cid = obj.optLong("cid").takeIf { it > 0 } ?: 0,
                     title = obj.optString("title", ""),
-                    pic = securePic,
+                    pic = pic,
                     duration = durationSec,
                     desc = obj.optString("description", null),
                     owner = VideoOwner(

@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit
 
 object BiliClient {
     private const val BASE = "https://api.bilibili.com"
-    private const val USER_AGENT = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36"
+    private const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36"
 
     lateinit var cookies: CookieStore
         private set
@@ -24,7 +24,7 @@ object BiliClient {
         cookies = CookieStore(context.applicationContext)
         val baseClient = OkHttpClient.Builder()
             .cookieJar(cookies)
-            .connectTimeout(12, TimeUnit.SECONDS)
+            .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(20, TimeUnit.SECONDS)
             .writeTimeout(20, TimeUnit.SECONDS)
             .build()
@@ -47,13 +47,33 @@ object BiliClient {
             .build()
     }
 
-    suspend fun getJson(url: String): JSONObject = withContext(Dispatchers.IO) {
+    /**
+     * 构建带查询参数的 URL
+     */
+    fun buildUrl(path: String, params: Map<String, String>): String {
+        val query = params.entries.joinToString("&") { (k, v) ->
+            "${WbiSigner.enc(k)}=${WbiSigner.enc(v)}"
+        }
+        return "$BASE$path?$query"
+    }
+
+    /**
+     * 发送 GET 请求并自动附带 Cookie（SESSDATA）
+     * 参考 BiliTVNative 的 BiliApiClient.getJson
+     */
+    suspend fun getJsonWithCookie(url: String): JSONObject = withContext(Dispatchers.IO) {
         try {
-            val request = Request.Builder()
+            val requestBuilder = Request.Builder()
                 .url(url)
                 .get()
-                .build()
-            val response = apiOkHttp.newCall(request).execute()
+
+            // 如果有 SESSDATA，显式添加 Cookie 头
+            val sessData = cookies.getCookieValue("SESSDATA")
+            if (!sessData.isNullOrBlank()) {
+                requestBuilder.header("Cookie", "SESSDATA=$sessData")
+            }
+
+            val response = apiOkHttp.newCall(requestBuilder.build()).execute()
             val code = response.code
             val body = response.body?.string() ?: ""
             if (body.isBlank()) {
@@ -72,6 +92,8 @@ object BiliClient {
             JSONObject().put("code", -1).put("message", "Network error: ${e.message}")
         }
     }
+
+    suspend fun getJson(url: String): JSONObject = getJsonWithCookie(url)
 
     suspend fun ensureWbiKeys(): WbiSigner.Keys {
         val cached = wbiKeys
