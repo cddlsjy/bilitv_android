@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 基本颜色 -->
+    <color name="background_dark">#121212</color>
+    <color name="surface_dark">#1E1E1E</color>
+    <color name="surface_elevated">#2A2A2A</color>
+
+    <!-- B站主题色 -->
+    <color name="bili_pink">#FB7299</color>
+    <color name="bili_pink_dark">#E6607A</color>
+
+    <!-- 文字颜色 -->
+    <color name="text_primary">#FFFFFF</color>
+    <color name="text_secondary">#AAAAAA</color>
+    <color name="text_hint">#666666</color>
+
+    <!-- 其他颜色 -->
+    <color name="focus_highlight">#40FFFFFF</color>
+    <color name="divider">#333333</color>
+    <color name="transparent">#00000000</color>
+    <color name="black_overlay">#80000000</color>
+
+    <!-- 状态栏 -->
+    <color name="status_bar">#00000000</color>
+</resources>

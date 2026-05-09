@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 底部导航文字样式 -->
+    <style name="NavTextActive">
+        <item name="android:textSize">14sp</item>
+        <item name="android:textColor">@color/bili_pink</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+    <style name="NavTextInactive">
+        <item name="android:textSize">12sp</item>
+        <item name="android:textColor">@color/text_secondary</item>
+    </style>
+
+    <!-- 卡片样式 -->
+    <style name="VideoCardStyle">
+        <item name="android:background">@drawable/bg_card</item>
+        <item name="android:padding">8dp</item>
+    </style>
+
+    <!-- 焦点高亮样式 -->
+    <style name="FocusHighlight">
+        <item name="android:background">@drawable/bg_focus_highlight</item>
+    </style>
+
+    <!-- 标题文字样式 -->
+    <style name="TitleText">
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:maxLines">2</item>
+        <item name="android:ellipsize">end</item>
+    </style>
+
+    <!-- 副标题文字样式 -->
+    <style name="SubtitleText">
+        <item name="android:textColor">@color/text_secondary</item>
+        <item name="android:textSize">12sp</item>
+    </style>
+</resources>

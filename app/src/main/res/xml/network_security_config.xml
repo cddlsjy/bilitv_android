@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- 允许明文流量（HTTP请求） -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- B站域名特殊配置 -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">bilibili.com</domain>
+        <domain includeSubdomains="true">hdslb.com</domain>
+        <domain includeSubdomains="true">biligame.com</domain>
+    </domain-config>
+</network-security-config>
